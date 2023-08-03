@@ -39,20 +39,28 @@ volatile int intervalPupuk = 0;
 volatile int suhuUdara = 0;
 volatile int kelembapanUdara = 0;
 volatile int ppm = 0;
-#define PTA_PIN D0
-#define PTB_PIN D1
-#define TAP_PIN D2
-#define TBP_PIN D4
-#define PGH_PIN D5
-#define PP_PIN  D6
+#define serialData D1
+#define latchClock D2
+#define shiftClock D3
+#define PTA_PIN 0b00000001
+#define PTB_PIN 0b00000010
+#define TAP_PIN 0b00000100
+#define TBP_PIN 0b00001000
+#define PGH_PIN 0b00010000
+#define PP_PIN  0b00100000
+#define ROW_A   0b01000000
+#define ROW_B   0b10000000
+byte currentState = 0b00000000;
+void turn_relay(byte binaryState, bool isOn);
+
+volatile unsigned long previousMillis = 0;
+volatile unsigned long interval = 5000;
+
 void setup()
 {
-  pinMode(PTA_PIN, OUTPUT);
-  pinMode(PTB_PIN, OUTPUT);
-  pinMode(TAP_PIN, OUTPUT);
-  pinMode(TBP_PIN, OUTPUT);
-  pinMode(PGH_PIN, OUTPUT);
-  pinMode(PP_PIN, OUTPUT);
+  pinMode(serialData, OUTPUT);
+  pinMode(latchClock, OUTPUT);
+  pinMode(shiftClock, OUTPUT);
   Serial.begin(115200);
 
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
@@ -83,10 +91,14 @@ void setup()
   config.token_status_callback = tokenStatusCallback; // see addons/TokenHelper.h
 
   Firebase.begin(&config, &auth);
+
+  turn_relay(0b11111111, false);
+  delay(500);
 }
 
 void loop()
 {
+  unsigned long currentMillis = millis();
   if (Firebase.ready())
   {
     if (Firebase.getString(fbdo, "/controls/ALL"))
@@ -97,20 +109,20 @@ void loop()
           char dataSwitch = fbdo.stringData().charAt(i);
           Serial.println(dataSwitch);
           if(dataSwitch == '0'){
-            if(i == 0) digitalWrite(PTA_PIN, LOW);
-            else if(i == 1) digitalWrite(PTB_PIN, LOW);
-            else if(i == 2) digitalWrite(TAP_PIN, LOW);
-            else if(i == 3) digitalWrite(TBP_PIN, LOW);
-            else if(i == 4) digitalWrite(PGH_PIN, LOW);
-            else if(i == 5) digitalWrite(PP_PIN, LOW);
+            if(i == 0) turn_relay(PTA_PIN, false);
+            else if(i == 1) turn_relay(PTB_PIN, false);
+            else if(i == 2) turn_relay(TAP_PIN, false);
+            else if(i == 3) turn_relay(TBP_PIN, false);
+            else if(i == 4) turn_relay(PGH_PIN, false);
+            else if(i == 5) turn_relay(PP_PIN, false);
           }
           if(dataSwitch == '1'){
-            if(i == 0) digitalWrite(PTA_PIN, HIGH);
-            else if(i == 1) digitalWrite(PTB_PIN, HIGH);
-            else if(i == 2) digitalWrite(TAP_PIN, HIGH);
-            else if(i == 3) digitalWrite(TBP_PIN, HIGH);
-            else if(i == 4) digitalWrite(PGH_PIN, HIGH);
-            else if(i == 5) digitalWrite(PP_PIN, HIGH);
+            if(i == 0) turn_relay(PTA_PIN, true);
+            else if(i == 1) turn_relay(PTB_PIN, true);
+            else if(i == 2) turn_relay(TAP_PIN, true);
+            else if(i == 3) turn_relay(TBP_PIN, true);
+            else if(i == 4) turn_relay(PGH_PIN, true);
+            else if(i == 5) turn_relay(PP_PIN, true);
           }
         }
       }
@@ -129,6 +141,7 @@ void loop()
           if(i==0) levelTanah = paramData.toInt();
           else if(i==3) intervalPompa = paramData.toInt();
           else if(i==6) intervalPupuk = paramData.toInt();
+          interval = intervalPompa;
         }
       }
     }
@@ -154,5 +167,32 @@ void loop()
     {
       Serial.println(fbdo.errorReason());
     }
+  }
+   if (currentMillis - previousMillis >= interval) {
+    if(kelembapanTanah < levelTanah){
+      turn_relay(PP_PIN, true);
+    }
+    else{
+      turn_relay(PP_PIN, false);
+    }
+    previousMillis = currentMillis; 
+
+  }
+}
+
+void turn_relay(byte binaryState, bool isOn){
+  if(isOn){
+    currentState |= binaryState;
+    digitalWrite(latchClock, LOW);
+    shiftOut(serialData, shiftClock, MSBFIRST, currentState);
+    digitalWrite(latchClock, HIGH);
+    Serial.println(currentState);
+  }
+  else{
+    currentState &= (~binaryState);
+    digitalWrite(latchClock, LOW);
+    shiftOut(serialData, shiftClock, MSBFIRST, currentState);
+    digitalWrite(latchClock, HIGH);
+    Serial.println(currentState);
   }
 }
